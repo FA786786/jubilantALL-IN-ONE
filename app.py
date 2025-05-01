@@ -5,7 +5,7 @@ from google.oauth2.service_account import Credentials
 
 st.title("Jubilant All-in-One App")
 
-try:
+try: df['datetime'] = pd.to_datetime(df['datetime'])
     # --- SETUP GOOGLE SHEETS ---
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=scope)
