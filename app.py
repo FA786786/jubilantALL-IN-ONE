@@ -5,7 +5,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # Set page
 st.set_page_config(page_title="🧾 All-in-One Sheet Viewer", layout="wide")
-
+<module>
+    df['datetime'] = pd.to_datetime(df['datetime'])
 # Auth setup using Streamlit secrets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 credentials = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["google_sheets"], scope)
