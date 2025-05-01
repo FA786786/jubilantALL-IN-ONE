@@ -1,76 +1,60 @@
+import streamlit as st
+import yfinance as yf
 import pandas as pd
-import numpy as np
-import ta
+from backtesting import Backtest
+from strategy import OneInAllStrategy
+import plotly.graph_objs as go
+from gsheet import log_trade_to_sheets
+from zerodha import place_order
 
-# === Load your data ===
-# df = pd.read_csv("your_data.csv")  # Must contain datetime, open, high, low, close, volume
-# Ensure datetime is parsed
-df['datetime'] = pd.to_datetime(df['datetime'])
-df.set_index('datetime', inplace=True)
+# --- Streamlit UI ---
+st.title("📊 One-in-All Trade System: Entry, SL, TGT, Exit")
 
-# === Generate 15-min OHLCV ===
-df_15 = df.resample('15T').agg({
-    'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
-}).dropna()
+symbol = st.text_input("Enter stock symbol (e.g., RELIANCE.NS):", "RELIANCE.NS")
+start_date = st.date_input("Start date:", pd.to_datetime("2024-01-01"))
+end_date = st.date_input("End date:", pd.to_datetime("today"))
 
-# === Calculate ATR on 15-min ===
-df_15['atr_15'] = ta.volatility.AverageTrueRange(
-    high=df_15['high'], low=df_15['low'], close=df_15['close'], window=14).average_true_range()
+if st.button("Run Backtest"):
+    # Download data from Yahoo Finance
+    data = yf.download(symbol, start=start_date, end=end_date, interval="5m")
+    data.dropna(inplace=True)
 
-# Merge 15-min data into original
-for col in ['high', 'low', 'close', 'open', 'atr_15']:
-    df[f'{col}_15'] = df_15[col].reindex(df.index, method='ffill')
+    # --- Check and Convert datetime column ---
+    if 'Datetime' not in data.columns:
+        st.error("The data does not contain a 'Datetime' column")
+    else:
+        # Ensure the 'Datetime' column exists and is properly converted
+        try:
+            data['Datetime'] = pd.to_datetime(data['Datetime'], errors='coerce')
+            # Handle any NaT (invalid) values in the 'Datetime' column
+            if data['Datetime'].isna().sum() > 0:
+                st.warning(f"Found {data['Datetime'].isna().sum()} invalid 'Datetime' values.")
+                data = data.dropna(subset=['Datetime'])
+            st.success("Datetime conversion successful")
+        except Exception as e:
+            st.error(f"Error converting 'Datetime' column: {e}")
+    
+    # Perform backtesting with the strategy
+    bt = Backtest(data, OneInAllStrategy, cash=100000, commission=0.002)
+    stats = bt.run()
+    
+    # Display Backtest Results
+    st.subheader("Backtest Results")
+    st.write(stats)
 
-# === Mother Candle Breakout ===
-df['mother_body'] = (df['high_15'].shift(1) - df['low_15'].shift(1)) > df['atr_15'].shift(1)
-df['inside_candle'] = (df['high_15'].shift(2) < df['high_15'].shift(1)) & (df['low_15'].shift(2) > df['low_15'].shift(1))
-df['breakout'] = df['close_15'] > df['high_15'].shift(1)
-df['mother_breakout'] = df['mother_body'] & df['inside_candle'] & df['breakout']
+    # Plot the Equity Curve using Plotly
+    st.subheader("Equity Curve")
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=stats['_equity_curve'].index, y=stats['_equity_curve']['Equity'], mode='lines', name='Equity'))
+    st.plotly_chart(fig)
 
-# === VWAP Calculation ===
-df['cum_vol_price'] = (df['close'] * df['volume']).cumsum()
-df['cum_vol'] = df['volume'].cumsum()
-df['vwap'] = df['cum_vol_price'] / df['cum_vol']
+    # Triggering Alerts, Logging Trades to Google Sheets, and Placing Orders
+    if stats["Buy"] > 0:
+        st.write("🚨 Buy Signal Triggered!")
+        log_trade_to_sheets(symbol, 'BUY', "1000", "1100", pd.to_datetime('today').strftime('%Y-%m-%d'))
+        place_order(symbol, 'BUY', 1)
 
-# VWAP Reversal Logic
-df['vwap_downtrend'] = (df['vwap'].shift(3) > df['vwap'].shift(2)) & (df['vwap'].shift(2) > df['vwap'].shift(1))
-df['vwap_flat_or_up'] = df['vwap'].shift(1) <= df['vwap']
-df['bullish_candle'] = df['close'] > df['open']
-df['above_vwap'] = df['close'] > df['vwap']
-df['vwap_reversal_up'] = df['vwap_downtrend'] & df['vwap_flat_or_up'] & df['bullish_candle'] & df['above_vwap']
-
-df['vwap_uptrend'] = (df['vwap'].shift(3) < df['vwap'].shift(2)) & (df['vwap'].shift(2) < df['vwap'].shift(1))
-df['vwap_flat_or_down'] = df['vwap'].shift(1) >= df['vwap']
-df['bearish_candle'] = df['close'] < df['open']
-df['below_vwap'] = df['close'] < df['vwap']
-df['vwap_reversal_down'] = df['vwap_uptrend'] & df['vwap_flat_or_down'] & df['bearish_candle'] & df['below_vwap']
-
-# === EQ + FUT Buy/Sell Logic ===
-df['vol_avg'] = df['volume'].rolling(10).mean()
-df['eq_buy_fut_buy'] = (df['close'] > df['open']) & (df['close'] > df['close'].shift(1)) & (df['volume'] > df['vol_avg']) & (df['open'] > df['open'].shift(1))
-df['eq_sell_fut_sell'] = (df['close'] < df['open']) & (df['close'] < df['close'].shift(1)) & (df['volume'] > df['vol_avg']) & (df['open'] < df['open'].shift(1))
-
-# === Entry Logic ===
-df['long_entry'] = df['mother_breakout'] | df['vwap_reversal_up'] | df['eq_buy_fut_buy']
-df['short_entry'] = df['vwap_reversal_down'] | df['eq_sell_fut_sell']
-
-# === SL and Target ===
-df['lowestLow'] = df['low'].rolling(5).min()
-df['highestHigh'] = df['high'].rolling(5).max()
-df['longTGT'] = df['close'] + (df['close'] - df['lowestLow']) * 1.5
-df['shortTGT'] = df['close'] - (df['highestHigh'] - df['close']) * 1.5
-
-# === Exit Logic ===
-df['long_exit'] = df['low'] <= df['lowestLow']
-df['short_exit'] = df['high'] >= df['highestHigh']
-
-# === Final Trade Signals with SL/TGT ===
-df['signal'] = np.select(
-    [df['long_entry'], df['short_entry'], df['long_exit'], df['short_exit']],
-    ['BUY', 'SELL', 'EXIT_LONG', 'EXIT_SHORT'],
-    default=''
-)
-
-# === Optional: Export or Display ===
-df_signals = df[df['signal'] != ''][['open', 'high', 'low', 'close', 'volume', 'signal', 'longTGT', 'shortTGT', 'lowestLow', 'highestHigh']]
-print(df_signals.tail(20))
+    if stats["Sell"] > 0:
+        st.write("🚨 Sell Signal Triggered!")
+        log_trade_to_sheets(symbol, 'SELL', "1000", "900", pd.to_datetime('today').strftime('%Y-%m-%d'))
+        place_order(symbol, 'SELL', 1)
