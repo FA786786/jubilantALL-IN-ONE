@@ -1,26 +1,29 @@
 import streamlit as st
 import pandas as pd
-from auth import get_google_sheet
+import gspread
+from google.oauth2.service_account import Credentials
 
-st.title("📊 Jubilant All-In-One: Google Sheet Data Viewer")
-
-# STEP 1: Load from Streamlit secrets
+# Set up Google Sheets credentials
 json_key = st.secrets["google_sheets"]
+scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+credentials = Credentials.from_service_account_info(json_key, scopes=scopes)
+client = gspread.authorize(credentials)
 
-# STEP 2: Google Sheet URL
-sheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit#gid=0"
+# Google Sheet URL or ID
+sheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE"
+sheet = client.open_by_url(sheet_url).sheet1
 
-# STEP 3: Load data
-try:
-    df = get_google_sheet(sheet_url, json_key)
+# Load data into DataFrame
+data = sheet.get_all_records()
+df = pd.DataFrame(data)
 
-    if 'datetime' in df.columns:
-        df['datetime'] = pd.to_datetime(df['datetime'])
-        st.success("Datetime converted successfully!")
-    else:
-        st.warning("No 'datetime' column found.")
+# Optional: parse datetime if column exists
+if 'datetime' in df.columns:
+    df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
 
-    st.dataframe(df)
-
-except Exception as e:
-    st.error(f"Error: {e}")
+# Display in Streamlit
+st.title("Google Sheet Viewer")
+st.dataframe(df)
