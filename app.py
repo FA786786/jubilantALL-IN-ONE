@@ -1,29 +1,38 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from google.oauth2.service_account import Credentials
+from oauth2client.service_account import ServiceAccountCredentials
 
-# Set up Google Sheets credentials
-json_key = st.secrets["google_sheets"]
-scopes = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-credentials = Credentials.from_service_account_info(json_key, scopes=scopes)
-client = gspread.authorize(credentials)
+# Set Streamlit title
+st.title("📊 Google Sheets Viewer")
 
-# Google Sheet URL or ID
-sheet_url = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE"
-sheet = client.open_by_url(sheet_url).sheet1
+# Google Sheet URL
+SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE"  # Replace this with your actual sheet URL
 
-# Load data into DataFrame
-data = sheet.get_all_records()
-df = pd.DataFrame(data)
+# Load Google Sheet data
+@st.cache_data
+def load_sheet(sheet_url):
+    try:
+        scope = [
+            "https://spreadsheets.google.com/feeds",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(
+            st.secrets["google_sheets"], scope
+        )
+        client = gspread.authorize(creds)
+        sheet = client.open_by_url(sheet_url)
+        data = sheet.sheet1.get_all_records()
+        return pd.DataFrame(data)
+    except Exception as e:
+        st.error(f"❌ Failed to load sheet: {e}")
+        return pd.DataFrame()
 
-# Optional: parse datetime if column exists
-if 'datetime' in df.columns:
-    df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+# Show sheet data
+df = load_sheet(SHEET_URL)
 
-# Display in Streamlit
-st.title("Google Sheet Viewer")
-st.dataframe(df)
+if not df.empty:
+    st.success("✅ Sheet loaded successfully!")
+    st.dataframe(df)
+else:
+    st.warning("⚠️ No data found or sheet couldn't be loaded.")
