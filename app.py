@@ -1,38 +1,38 @@
-import streamlit as st
 import pandas as pd
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import streamlit as st
 
-# Set Streamlit title
-st.title("📊 Google Sheets Viewer")
+# Example: loading the dataframe (replace this with your actual loading method)
+# df = pd.read_csv("your_file.csv")  # Example, replace with your data source
 
-# Google Sheet URL
-SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE"  # Replace this with your actual sheet URL
+# Make sure to load your dataframe before proceeding
+# If you're using an API or another method, load your data accordingly
 
-# Load Google Sheet data
-@st.cache_data
-def load_sheet(sheet_url):
-    try:
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(
-            st.secrets["google_sheets"], scope
-        )
-        client = gspread.authorize(creds)
-        sheet = client.open_by_url(sheet_url)
-        data = sheet.sheet1.get_all_records()
-        return pd.DataFrame(data)
-    except Exception as e:
-        st.error(f"❌ Failed to load sheet: {e}")
-        return pd.DataFrame()
+try:
+    # Example: Loading a CSV file (replace with your actual method)
+    df = pd.read_csv('your_file.csv')  # Replace with your actual data source
 
-# Show sheet data
-df = load_sheet(SHEET_URL)
+    # Check if 'datetime' column exists
+    if 'datetime' in df.columns:
+        # Convert 'datetime' column to pandas datetime format
+        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')
+        # Handle invalid datetime values after coercion (e.g., NaT)
+        if df['datetime'].isna().any():
+            st.warning("⚠️ Some rows have invalid datetime values that were set to NaT.")
+    else:
+        st.warning("⚠️ 'datetime' column not found in the data.")
+        st.stop()
 
-if not df.empty:
-    st.success("✅ Sheet loaded successfully!")
-    st.dataframe(df)
-else:
-    st.warning("⚠️ No data found or sheet couldn't be loaded.")
+    # Display the first few rows to verify data and datetime conversion
+    st.write("Data Sample:", df.head())
+
+    # Continue with your trading logic and analysis
+    # Example: plotting or other operations
+    # Add your analysis or trading logic here, for example:
+    # st.line_chart(df['your_column_name'])  # Replace with your actual chart logic
+
+except FileNotFoundError as e:
+    st.error(f"Error: The file was not found. Please check your file path. Details: {e}")
+except pd.errors.EmptyDataError:
+    st.error("Error: The file is empty. Please check the contents.")
+except Exception as e:
+    st.error(f"An unexpected error occurred: {e}")
