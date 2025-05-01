@@ -1,40 +1,41 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 
-# Streamlit page config
-st.set_page_config(page_title="ALL IN ONE Viewer", layout="wide")
+# Setup
+st.title("Jubilant All-in-One App")
 
-# Google Sheets authentication
+# Load credentials from secrets
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["google_sheets"], scope)
-client = gspread.authorize(credentials)
+creds = Credentials.from_service_account_info(st.secrets["google_sheets"], scopes=scope)
+client = gspread.authorize(creds)
 
-# Open your Google Sheet
-sheet_url = "https://docs.google.com/spreadsheets/d/1CCJXoIBKWpGWybrr6Rs81p55m3dsIYcKJhBmBDQNR0k"
-worksheet = client.open_by_url(sheet_url).worksheet("ALL IN ONE")
-data = worksheet.get_all_records()
+# Load your Google Sheet
+sheet = client.open_by_url('https://docs.google.com/spreadsheets/d/1CCJXoIBKWpGWybrr6Rs81p55m3dsIYcKJhBmBDQNR0k/edit?gid=0#gid=0').sheet1
+data = sheet.get_all_records()
 df = pd.DataFrame(data)
 
-# Automatically detect any date/time column
-datetime_col = None
+# Display Data
+st.subheader("Raw Data")
+st.write(df)
+
+# Fix datetime column
+datetime_column = None
 for col in df.columns:
-    if 'date' in col.lower() or 'time' in col.lower():
-        datetime_col = col
+    if col.strip().lower() in ['datetime', 'date']:
+        datetime_column = col
         break
 
-# Try to convert and sort by detected datetime column
-if datetime_col:
-    try:
-        df[datetime_col] = pd.to_datetime(df[datetime_col], errors='coerce')
-        df = df.dropna(subset=[datetime_col])
-        df = df.sort_values(by=datetime_col, ascending=False)
-        st.success(f"Using datetime column: `{datetime_col}`")
-    except Exception as e:
-        st.warning(f"Could not parse datetime column `{datetime_col}`: {e}")
+if datetime_column:
+    df[datetime_column] = pd.to_datetime(df[datetime_column], errors='coerce')
+    st.subheader("Parsed Datetime")
+    st.write(df[[datetime_column]])
 else:
-    st.warning("⚠ No datetime column found in your sheet.")
+    st.error("❌ No 'datetime' or 'date' column found in the sheet.")
 
-# Show the data
-st.dataframe(df)
+# Proceed with other logic if datetime is parsed
+if datetime_column and df[datetime_column].notnull().any():
+    st.success("✅ Datetime column parsed successfully.")
+else:
+    st.warning("⚠️ Datetime parsing failed or no valid dates found.")
