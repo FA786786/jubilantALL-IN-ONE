@@ -1,53 +1,36 @@
+import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import streamlit as st
 
-# Authenticate Google Sheets API using Streamlit Secrets
-def authenticate_google_sheets():
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        st.secrets["google_sheets"], 
-        ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    )
-    client = gspread.authorize(creds)
-    return client
+# Set page config
+st.set_page_config(page_title="All-in-One Sheet Viewer", layout="wide")
 
-# Access a specific Google Sheet
-def get_google_sheet(sheet_name):
-    client = authenticate_google_sheets()
-    sheet = client.open(sheet_name).sheet1  # Open the first sheet
-    return sheet
+# Google Sheets authentication
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+credentials = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["google_sheets"], scope)
+client = gspread.authorize(credentials)
 
-# Load data from Google Sheets into a DataFrame
-def load_data_from_sheets(sheet_name):
-    sheet = get_google_sheet(sheet_name)
-    data = sheet.get_all_records()  # Get all records from the sheet
-    df = pd.DataFrame(data)
-    return df
+# Open the sheet
+spreadsheet = client.open_by_url("https://docs.google.com/spreadsheets/d/1CCJXoIBKWpGWybrr6Rs81p55m3dsIYcKJhBmBDQNR0k/edit?usp=sharing")
+worksheet = spreadsheet.worksheet("ALL IN ONE")
 
-# Process the data: remove columns and convert datetime
-def process_data(df):
-    # Remove specific columns
-    df = df.drop(columns=['column1', 'column2'], errors='ignore')
-    
-    # Convert 'datetime' column to pandas datetime
-    df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce')  # 'coerce' converts invalid dates to NaT
-    return df
+# Get data into dataframe
+data = worksheet.get_all_records()
+df = pd.DataFrame(data)
 
-# Streamlit interface
-def main():
-    # Specify your Google Sheets sheet name
-    sheet_name = 'YourSheetNameHere'  # Replace with your actual sheet name
+# Parse 'Date' or 'datetime' column safely
+datetime_column = "Date" if "Date" in df.columns else "datetime"
+if datetime_column in df.columns:
+    try:
+        df[datetime_column] = pd.to_datetime(df[datetime_column], errors="coerce")
+    except Exception as e:
+        st.error(f"Error converting {datetime_column} to datetime: {e}")
 
-    # Load data from Google Sheets
-    df = load_data_from_sheets(sheet_name)
+# Optional: drop rows or columns here
+# df.drop(columns=['UnwantedColumn'], inplace=True)  # example
+# df.dropna(subset=[datetime_column], inplace=True)
 
-    # Process the data: Remove unwanted columns and convert datetime
-    df = process_data(df)
-
-    # Display the DataFrame in the Streamlit app
-    st.write("Processed Data", df)
-
-# Run the Streamlit app
-if __name__ == "__main__":
-    main()
+# Show dataframe
+st.title("All-in-One Sheet Viewer")
+st.dataframe(df)
